@@ -5,6 +5,7 @@ import os
 from datetime import datetime
 from num2words import num2words
 from tkinter import Tk, filedialog
+import re
 
 # 📌 Función para seleccionar archivos con un cuadro de diálogo
 def seleccionar_archivo(tipo):
@@ -49,6 +50,32 @@ def numero_a_texto(numero):
         # Si hay algún error, devolver un formato básico
         return f"{formatear_valor(numero)} (PESOS {decimal:02d}/100 M.N.)"
 
+# Función para obtener solo el valor numérico formateado
+def solo_valor_numerico(numero):
+    if pd.isna(numero) or numero == 0:
+        return "0.00"
+    return formatear_valor(numero)
+
+# Función para obtener el valor con texto para NETO
+def valor_neto_con_texto(numero):
+    if pd.isna(numero) or numero == 0:
+        return "CERO PESOS 00/100 M.N."
+    
+    # Separar parte entera y decimal
+    partes = str(round(numero, 2)).split('.')
+    entero = int(partes[0])
+    decimal = int(partes[1]) if len(partes) > 1 else 0
+    
+    # Convertir a palabras en español
+    try:
+        texto_entero = num2words(entero, lang='es').upper()
+        
+        # Formato específico para NETO con texto (sin paréntesis)
+        return f"{texto_entero} PESOS {decimal:02d}/100 M.N."
+    except:
+        # Si hay algún error, devolver un formato básico
+        return f"PESOS {decimal:02d}/100 M.N."
+
 # Función para reemplazar texto sin perder formato
 def reemplazar_texto(doc, buscar, reemplazo, convertir_a_texto=False):
     # Si es un valor numérico y se debe convertir a texto
@@ -74,6 +101,168 @@ def reemplazar_texto(doc, buscar, reemplazo, convertir_a_texto=False):
                         for run in parrafo.runs:
                             if buscar in run.text:
                                 run.text = run.text.replace(buscar, texto_completo)
+                                run.bold = True
+                                run.font.name = "Verdana"
+                                run.font.size = Pt(11)
+
+# Función especial para manejar las diferentes instancias de NETO
+def reemplazar_neto(doc, valor_neto):
+    if pd.isna(valor_neto):
+        valor_neto = 0
+    
+    # Asegurarse de que sea un número
+    if isinstance(valor_neto, str):
+        try:
+            valor_neto = float(valor_neto.replace(',', '').replace(' ', ''))
+        except:
+            valor_neto = 0
+    
+    # Obtener los valores formateados
+    valor_numerico = solo_valor_numerico(valor_neto)
+    texto_completo = valor_neto_con_texto(valor_neto)
+    
+    # Patrones para identificar los diferentes contextos
+    patrones_solo_numero = [
+        r"BUENO POR: \$ «NETO»",
+        r"Total neto a recibir\s+\$ «NETO»"
+    ]
+    
+    patrones_con_texto = [
+        r"Recibí la cantidad de \$ «NETO»",
+        r"se realizará por \$ «NETO»"
+    ]
+    
+    # Reemplazar en párrafos
+    for parrafo in doc.paragraphs:
+        texto_original = parrafo.text
+        texto_modificado = texto_original
+        
+        # Verificar si es un patrón que solo necesita el número
+        for patron in patrones_solo_numero:
+            if re.search(patron, texto_original):
+                texto_modificado = texto_modificado.replace("«NETO»", valor_numerico)
+                break
+        
+        # Verificar si es un patrón que necesita número y texto
+        for patron in patrones_con_texto:
+            if re.search(patron, texto_original):
+                texto_modificado = texto_modificado.replace("«NETO»", f"{valor_numerico} ({texto_completo})")
+                break
+        
+        # Si no coincide con ningún patrón específico, usar solo el número
+        if "«NETO»" in texto_modificado:
+            texto_modificado = texto_modificado.replace("«NETO»", valor_numerico)
+        
+        # Si hubo cambios, actualizar el texto manteniendo el formato
+        if texto_modificado != texto_original:
+            for run in parrafo.runs:
+                if "«NETO»" in run.text:
+                    # Determinar qué reemplazo usar
+                    for patron in patrones_solo_numero:
+                        if re.search(patron, texto_original):
+                            run.text = run.text.replace("«NETO»", valor_numerico)
+                            break
+                    
+                    for patron in patrones_con_texto:
+                        if re.search(patron, texto_original):
+                            run.text = run.text.replace("«NETO»", f"{valor_numerico} ({texto_completo})")
+                            break
+                    
+                    # Si no coincide con ningún patrón específico, usar solo el número
+                    if "«NETO»" in run.text:
+                        run.text = run.text.replace("«NETO»", valor_numerico)
+                    
+                    run.bold = True
+                    run.font.name = "Verdana"
+                    run.font.size = Pt(11)
+    
+    # Reemplazar en tablas
+    for tabla in doc.tables:
+        for fila in tabla.rows:
+            for celda in fila.cells:
+                for parrafo in celda.paragraphs:
+                    texto_original = parrafo.text
+                    
+                    # Para tablas, generalmente solo usamos el valor numérico
+                    if "«NETO»" in texto_original:
+                        for run in parrafo.runs:
+                            if "«NETO»" in run.text:
+                                run.text = run.text.replace("«NETO»", valor_numerico)
+                                run.bold = True
+                                run.font.name = "Verdana"
+                                run.font.size = Pt(11)
+
+# Función especial para manejar las diferentes instancias de Salario_por_día
+def reemplazar_salario(doc, valor_salario):
+    if pd.isna(valor_salario):
+        valor_salario = 0
+    
+    # Asegurarse de que sea un número
+    if isinstance(valor_salario, str):
+        try:
+            valor_salario = float(valor_salario.replace(',', '').replace(' ', ''))
+        except:
+            valor_salario = 0
+    
+    # Obtener los valores formateados
+    valor_numerico = solo_valor_numerico(valor_salario)
+    
+    # Convertir a palabras en español
+    partes = str(round(valor_salario, 2)).split('.')
+    entero = int(partes[0])
+    decimal = int(partes[1]) if len(partes) > 1 else 0
+    
+    try:
+        texto_entero = num2words(entero, lang='es').upper()
+        texto_completo = f"{texto_entero} PESOS {decimal:02d}/100 M.N."
+    except:
+        texto_completo = f"PESOS {decimal:02d}/100 M.N."
+    
+    # Patrones para identificar los diferentes contextos
+    patrones_con_texto = [
+        r"SALARIO DIARIO: \$ «Salario_por_día»",
+        r"salario diario por la cantidad de \$ «Salario_por_día»"
+    ]
+    
+    # Reemplazar en párrafos
+    for parrafo in doc.paragraphs:
+        texto_original = parrafo.text
+        
+        # Verificar si es un patrón que necesita número y texto
+        necesita_texto = False
+        for patron in patrones_con_texto:
+            if re.search(patron, texto_original, re.IGNORECASE) or "salario diario por la cantidad de $ «Salario_por_día»" in texto_original:
+                necesita_texto = True
+                break
+        
+        if necesita_texto:
+            for run in parrafo.runs:
+                if "«Salario_por_día»" in run.text:
+                    run.text = run.text.replace("«Salario_por_día»", f"{valor_numerico} ({texto_completo})")
+                    run.bold = True
+                    run.font.name = "Verdana"
+                    run.font.size = Pt(11)
+        # Para otros casos donde solo se necesita el número
+        elif "«Salario_por_día»" in texto_original:
+            for run in parrafo.runs:
+                if "«Salario_por_día»" in run.text:
+                    run.text = run.text.replace("«Salario_por_día»", valor_numerico)
+                    run.bold = True
+                    run.font.name = "Verdana"
+                    run.font.size = Pt(11)
+    
+    # Reemplazar en tablas
+    for tabla in doc.tables:
+        for fila in tabla.rows:
+            for celda in fila.cells:
+                for parrafo in celda.paragraphs:
+                    texto_original = parrafo.text
+                    
+                    # Para tablas, generalmente solo usamos el valor numérico
+                    if "«Salario_por_día»" in texto_original:
+                        for run in parrafo.runs:
+                            if "«Salario_por_día»" in run.text:
+                                run.text = run.text.replace("«Salario_por_día»", valor_numerico)
                                 run.bold = True
                                 run.font.name = "Verdana"
                                 run.font.size = Pt(11)
@@ -108,14 +297,14 @@ for index, fila in df.iterrows():
     reemplazar_texto(doc, "«Nombre_completo»", fila.get("Nombre completo", ""))
     reemplazar_texto(doc, "«Puesto»", fila.get("Puesto", ""))
     
-    # Asegurarse de que Salario por día sea un número antes de convertirlo a texto
+    # Usar la función especial para Salario_por_día
     salario_dia = fila.get("Salario por día", 0)
     if isinstance(salario_dia, str):
         try:
             salario_dia = float(salario_dia.replace(',', '').replace(' ', ''))
         except:
             salario_dia = 0
-    reemplazar_texto(doc, "«Salario_por_día»", salario_dia, convertir_a_texto=True)
+    reemplazar_salario(doc, salario_dia)
     
     reemplazar_texto(doc, "«Fecha_de_alta»", fila.get("Fecha de alta", ""))
     reemplazar_texto(doc, "«Fecha_de_baja»", fila.get("Fecha de baja", ""))
@@ -128,7 +317,10 @@ for index, fila in df.iterrows():
     reemplazar_texto(doc, "«TOTAL_ISR»", fila.get("ISR MENSUAL", ""))
     reemplazar_texto(doc, "«IMSS»", fila.get("IMSS", ""))
     reemplazar_texto(doc, "«TOTAL_DEDUCCIONES»", fila.get("TOTAL DEDUCCIONES", ""))
-    reemplazar_texto(doc, "«NETO»", fila.get("NETO", ""))
+    
+    # Usar la función especial para NETO
+    reemplazar_neto(doc, fila.get("NETO", 0))
+    
     reemplazar_texto(doc, "«Banco»", fila.get("Banco", ""))
     reemplazar_texto(doc, "«CUENTA»", fila.get("cuenta", ""))
 
